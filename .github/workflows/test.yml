@@ -1,0 +1,60 @@
+name: Emulator Test
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  integration_test:
+    runs-on: ubuntu-latest
+    name: "Android Integration Test"
+    steps:
+      - uses: actions/checkout@v2
+
+      - name: "Enable KVM for Emulator Acceleration"
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: "Install Android SDK Components"
+        run: |
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install 'build-tools;31.0.0' platform-tools 'platforms;android-29' > /dev/null
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install emulator --channel=0 > /dev/null
+          $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager --install 'system-images;android-29;default;x86_64' --channel=0 > /dev/null
+          echo no | $ANDROID_SDK_ROOT/cmdline-tools/latest/bin/avdmanager create avd --force -n test --abi 'default/x86_64' --package 'system-images;android-29;default;x86_64' --device 'Nexus 6'
+
+      - name: "Start Android Emulator"
+        run: |
+          $ANDROID_SDK_ROOT/emulator/emulator -avd test -no-audio -no-window -no-snapshot &
+          $ANDROID_SDK_ROOT/platform-tools/adb wait-for-device
+          $ANDROID_SDK_ROOT/platform-tools/adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done; input keyevent 82'
+
+      - name: "Confirm Emulator Readiness"
+        run: |
+          $ANDROID_SDK_ROOT/platform-tools/adb devices
+          $ANDROID_SDK_ROOT/platform-tools/adb wait-for-device
+          $ANDROID_SDK_ROOT/platform-tools/adb shell getprop sys.boot_completed
+
+      - name: "Download APK from Release"
+        run: curl -L -o app.apk "https://github.com/raulsvelazquez/android-emulator-workflow/releases/download/prueba/app.apk"
+        shell: bash
+  
+      - name: "Check APK Download Integrity"
+        run: |
+          if [ -s "app.apk" ]; then
+            echo "APK file downloaded successfully and is not empty."
+          else
+            echo "Error: APK file did not download correctly or is empty."
+            exit 1
+          fi
+        shell: bash
+  
+      - name: "Install APK on Emulator"
+        run: |
+          if [ -s "app.apk" ]; then
+            echo "APK file downloaded successfully and is not empty."
+            $ANDROID_SDK_ROOT/platform-tools/adb install app.apk
+          else
+            echo "Error: APK file did not download correctly or is empty."
+            exit 1
+          fi
